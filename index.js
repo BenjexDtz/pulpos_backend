@@ -3,6 +3,9 @@ const cors = require('cors');
 const pool = require('./db'); // Importamos nuestra conexión
 require('dotenv').config();
 
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
 const app = express();
 
 // Middlewares (Para que el servidor entienda JSON y permita conexiones externas)
@@ -116,6 +119,113 @@ app.get('/api/viajes/reporte', async (req, res) => {
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
+
+// ==========================================
+// MÓDULO DE AUTENTICACIÓN Y SEGURIDAD
+// ==========================================
+
+// 1. Ruta POST: Registrar un nuevo chofer con contraseña segura
+app.post('/api/choferes/registro', async (req, res) => {
+    const { nombre_completo, placa_vehiculo, password } = req.body;
+
+    try {
+        // Encriptar la contraseña (El número 10 es el nivel de seguridad/saltos)
+        const salt = await bcrypt.genSalt(10);
+        const password_hash = await bcrypt.hash(password, salt);
+
+        const query = `
+            INSERT INTO choferes (nombre_completo, placa_vehiculo, password_hash)
+            VALUES ($1, $2, $3) RETURNING id, nombre_completo, placa_vehiculo;
+        `;
+        const valores = [nombre_completo, placa_vehiculo, password_hash];
+        const resultado = await pool.query(query, valores);
+
+        res.status(201).json({ 
+            mensaje: '✅ Chofer registrado con éxito', 
+            chofer: resultado.rows[0] 
+        });
+    } catch (error) {
+        console.error('Error al registrar:', error);
+        res.status(500).json({ error: 'Error al registrar chofer en la base de datos' });
+    }
+});
+
+// 2. Ruta POST: Iniciar Sesión (Login)
+app.post('/api/login', async (req, res) => {
+    const { placa_vehiculo, password } = req.body;
+
+    try {
+        // A) Buscar al chofer por su placa
+        const query = 'SELECT * FROM choferes WHERE placa_vehiculo = $1';
+        const resultado = await pool.query(query, [placa_vehiculo]);
+
+        // Si no existe la placa, rechazamos
+        if (resultado.rows.length === 0) {
+            return res.status(401).json({ error: '❌ Placa o contraseña incorrecta' });
+        }
+
+        const chofer = resultado.rows[0];
+
+        // B) Verificar si la contraseña coincide con la encriptada
+        const passwordValida = await bcrypt.compare(password, chofer.password_hash);
+        
+        if (!passwordValida) {
+            return res.status(401).json({ error: '❌ Placa o contraseña incorrecta' });
+        }
+
+        // C) Generar el Token JWT (El "Gafete" digital)
+        const token = jwt.sign(
+            { id: chofer.id, placa: chofer.placa_vehiculo },
+            process.env.JWT_SECRET,
+            { expiresIn: '30d' } // El chofer no tendrá que loguearse por 30 días
+        );
+
+        // D) Enviar el pase de entrada al celular
+        res.json({
+            mensaje: '🔓 Login exitoso',
+            token: token,
+            chofer: {
+                id: chofer.id,
+                nombre_completo: chofer.nombre_completo,
+                placa_vehiculo: chofer.placa_vehiculo
+            }
+        });
+
+    } catch (error) {
+        console.error('Error en Login:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// ==========================================
+// MÓDULO WEB ADMIN (GERENCIA)
+// ==========================================
+
+// Ruta GET: Obtener todos los viajes con el nombre del chofer
+// Ruta GET: Obtener todos los viajes con el nombre del chofer
+app.get('/api/admin/viajes', async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                v.id_servidor AS id, 
+                c.nombre_completo AS chofer, 
+                c.placa_vehiculo,
+                v.distancia_km, 
+                v.tiempo_detencion_min, 
+                v.tarifa_cobrada AS tarifa_total, 
+                v.fecha_hora_viaje AS fecha_hora 
+            FROM viajes_historial v
+            JOIN choferes c ON v.chofer_id = c.id
+            ORDER BY v.fecha_hora_viaje DESC;
+        `;
+        const resultado = await pool.query(query);
+        res.json(resultado.rows);
+    } catch (error) {
+        console.error('Error al obtener reporte:', error);
+        res.status(500).json({ error: 'Error cargando el dashboard' });
+    }
+});
+
 
 // --- INICIO DEL SERVIDOR ---
 const PORT = process.env.PORT || 3000;

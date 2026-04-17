@@ -35,3 +35,6 @@ VALUES ('El Alto - Topografía Compleja', 2.00, 1.40, 2.50, 0.50);
 
 INSERT INTO choferes (nombre_completo, placa_vehiculo)
 VALUES ('Boris Benjamín Barboza', '1234-PUL');
+
+
+ALTER TABLE choferes ADD COLUMN password_hash VARCHAR(255);
