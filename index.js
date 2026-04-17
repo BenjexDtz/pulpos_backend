@@ -11,14 +11,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Middleware JWT — declarado aquí arriba para que todas las rutas puedan usarlo
+// Middleware JWT
 const verificarToken = (req, res, next) => {
     const token = req.headers['authorization'];
-    
-    if (!token) {
-        return res.status(403).json({ error: '🚫 Acceso denegado. Se requiere un token de Gerencia.' });
-    }
-
+    if (!token) return res.status(403).json({ error: '🚫 Acceso denegado. Se requiere un token de Gerencia.' });
     try {
         const tokenLimpio = token.split(" ")[1] || token;
         const decodificado = jwt.verify(tokenLimpio, process.env.JWT_SECRET);
@@ -31,12 +27,10 @@ const verificarToken = (req, res, next) => {
 
 // --- RUTAS ---
 
-// 1. Ruta base
 app.get('/', (req, res) => {
     res.json({ mensaje: '📡 Central de Radio Taxis Pulpos en línea' });
 });
 
-// 2. Parámetros topográficos
 app.get('/api/parametros', async (req, res) => {
     try {
         const resultado = await pool.query('SELECT * FROM parametros_topograficos');
@@ -47,13 +41,10 @@ app.get('/api/parametros', async (req, res) => {
     }
 });
 
-// 3. Reporte general
 app.get('/api/viajes/reporte', async (req, res) => {
     try {
         const query = `
-            SELECT 
-                c.nombre_completo,
-                c.placa_vehiculo,
+            SELECT c.nombre_completo, c.placa_vehiculo,
                 COUNT(v.id_servidor) as total_viajes,
                 SUM(v.distancia_km) as kilometros_recorridos,
                 SUM(v.tarifa_cobrada) as dinero_recaudado
@@ -63,15 +54,8 @@ app.get('/api/viajes/reporte', async (req, res) => {
             ORDER BY dinero_recaudado DESC;
         `;
         const resultado = await pool.query(query);
-
-        if (resultado.rows.length === 0) {
-            return res.json({ mensaje: 'No hay viajes registrados aún.' });
-        }
-
-        res.json({
-            mensaje: 'Reporte generado exitosamente',
-            estadisticas: resultado.rows
-        });
+        if (resultado.rows.length === 0) return res.json({ mensaje: 'No hay viajes registrados aún.' });
+        res.json({ mensaje: 'Reporte generado exitosamente', estadisticas: resultado.rows });
     } catch (error) {
         console.error('❌ Error al generar el reporte:', error.message);
         res.status(500).json({ error: 'Error interno del servidor' });
@@ -82,32 +66,18 @@ app.get('/api/viajes/reporte', async (req, res) => {
 // MÓDULO APP MÓVIL: SINCRONIZACIÓN
 // ==========================================
 
-// 🔥 ÚNICA ruta de sincronización — recibe UN viaje por llamada (objeto, no array)
 app.post('/api/viajes/sincronizar', async (req, res) => {
     const { chofer_id, distancia_km, tiempo_detencion_min, tarifa_cobrada, fecha_hora_viaje } = req.body;
-
-    if (!chofer_id || distancia_km === undefined) {
-        return res.status(400).json({ error: 'Faltan datos del viaje.' });
-    }
+    if (!chofer_id || distancia_km === undefined) return res.status(400).json({ error: 'Faltan datos del viaje.' });
 
     try {
         const query = `
-            INSERT INTO viajes_historial 
-            (chofer_id, distancia_km, tiempo_detencion_min, tarifa_cobrada, fecha_hora_viaje)
-            VALUES ($1, $2, $3, $4, $5) 
-            RETURNING id_servidor;
+            INSERT INTO viajes_historial (chofer_id, distancia_km, tiempo_detencion_min, tarifa_cobrada, fecha_hora_viaje)
+            VALUES ($1, $2, $3, $4, $5) RETURNING id_servidor;
         `;
-        const valores = [chofer_id, distancia_km, tiempo_detencion_min, tarifa_cobrada, fecha_hora_viaje];
-        
-        const resultado = await pool.query(query, valores);
-        
+        const resultado = await pool.query(query, [chofer_id, distancia_km, tiempo_detencion_min, tarifa_cobrada, fecha_hora_viaje]);
         console.log(`📥 Viaje recibido del chofer ${chofer_id} — ID asignado: ${resultado.rows[0].id_servidor}`);
-        
-        res.status(201).json({ 
-            success: true, 
-            mensaje: 'Viaje sincronizado', 
-            id_servidor: resultado.rows[0].id_servidor 
-        });
+        res.status(201).json({ success: true, mensaje: 'Viaje sincronizado', id_servidor: resultado.rows[0].id_servidor });
     } catch (error) {
         console.error('❌ Error sincronizando viaje:', error.message);
         res.status(500).json({ error: 'Error al guardar en la base central' });
@@ -120,14 +90,9 @@ app.post('/api/viajes/sincronizar', async (req, res) => {
 
 app.post('/api/admin/login', (req, res) => {
     const { usuario, password } = req.body;
-
     if (usuario === 'admin' && password === 'pulpos2026') {
-        const token = jwt.sign(
-            { rol: 'gerente' },
-            process.env.JWT_SECRET,
-            { expiresIn: '8h' }
-        );
-        res.json({ mensaje: '✅ Bienvenido a la Gerencia', token: token });
+        const token = jwt.sign({ rol: 'gerente' }, process.env.JWT_SECRET, { expiresIn: '8h' });
+        res.json({ mensaje: '✅ Bienvenido a la Gerencia', token });
     } else {
         res.status(401).json({ error: '❌ Usuario o contraseña incorrecta' });
     }
@@ -136,14 +101,9 @@ app.post('/api/admin/login', (req, res) => {
 app.get('/api/admin/viajes', verificarToken, async (req, res) => {
     try {
         const query = `
-            SELECT 
-                v.id_servidor AS id, 
-                c.nombre_completo AS chofer, 
-                c.placa_vehiculo,
-                v.distancia_km, 
-                v.tiempo_detencion_min, 
-                v.tarifa_cobrada AS tarifa_total, 
-                v.fecha_hora_viaje AS fecha_hora 
+            SELECT v.id_servidor AS id, c.nombre_completo AS chofer, c.placa_vehiculo,
+                v.distancia_km, v.tiempo_detencion_min, 
+                v.tarifa_cobrada AS tarifa_total, v.fecha_hora_viaje AS fecha_hora 
             FROM viajes_historial v
             JOIN choferes c ON v.chofer_id = c.id
             ORDER BY v.fecha_hora_viaje DESC;
@@ -156,60 +116,101 @@ app.get('/api/admin/viajes', verificarToken, async (req, res) => {
     }
 });
 
+// 🔥 NUEVO: Listar todos los choferes (nombre, placa, estado — sin password)
+app.get('/api/admin/choferes', verificarToken, async (req, res) => {
+    try {
+        const resultado = await pool.query(
+            'SELECT id, nombre_completo, placa_vehiculo, estado_activo FROM choferes ORDER BY nombre_completo ASC'
+        );
+        res.json(resultado.rows);
+    } catch (error) {
+        console.error('Error al listar choferes:', error.message);
+        res.status(500).json({ error: 'Error al obtener la lista de choferes.' });
+    }
+});
+
+// Registrar nuevo chofer
 app.post('/api/admin/choferes', verificarToken, async (req, res) => {
     const { nombre_completo, placa_vehiculo, password } = req.body;
-
-    if (!nombre_completo || !placa_vehiculo || !password) {
+    if (!nombre_completo || !placa_vehiculo || !password)
         return res.status(400).json({ error: '⚠️ Faltan datos obligatorios.' });
-    }
 
     try {
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(password, salt);
-
         const query = `
             INSERT INTO choferes (nombre_completo, placa_vehiculo, password_hash)
-            VALUES ($1, $2, $3)
-            RETURNING id, nombre_completo, placa_vehiculo, estado_activo;
+            VALUES ($1, $2, $3) RETURNING id, nombre_completo, placa_vehiculo, estado_activo;
         `;
-        const valores = [nombre_completo, placa_vehiculo, passwordHash];
-        const resultado = await pool.query(query, valores);
-        
-        res.status(201).json({ 
-            mensaje: '✅ Chofer registrado exitosamente en la central.',
-            chofer: resultado.rows[0] 
-        });
+        const resultado = await pool.query(query, [nombre_completo, placa_vehiculo, passwordHash]);
+        res.status(201).json({ mensaje: '✅ Chofer registrado exitosamente en la central.', chofer: resultado.rows[0] });
     } catch (error) {
         console.error('Error al registrar chofer:', error);
-        if (error.code === '23505') {
+        if (error.code === '23505')
             return res.status(400).json({ error: '❌ Esta placa vehicular ya está registrada en el sistema.' });
-        }
         res.status(500).json({ error: 'Error interno del servidor al registrar chofer.' });
     }
 });
 
+// 🔥 NUEVO: Resetear contraseña de un chofer
+app.patch('/api/admin/choferes/:id/password', verificarToken, async (req, res) => {
+    const { id } = req.params;
+    const { nueva_password } = req.body;
+
+    if (!nueva_password || nueva_password.length < 4)
+        return res.status(400).json({ error: '⚠️ La contraseña debe tener al menos 4 caracteres.' });
+
+    try {
+        const salt = await bcrypt.genSalt(10);
+        const passwordHash = await bcrypt.hash(nueva_password, salt);
+        const resultado = await pool.query(
+            'UPDATE choferes SET password_hash = $1 WHERE id = $2 RETURNING id, nombre_completo',
+            [passwordHash, id]
+        );
+        if (resultado.rows.length === 0) return res.status(404).json({ error: 'Chofer no encontrado.' });
+        console.log(`🔑 Contraseña reseteada — ${resultado.rows[0].nombre_completo}`);
+        res.json({ mensaje: `✅ Contraseña actualizada para ${resultado.rows[0].nombre_completo}.` });
+    } catch (error) {
+        console.error('Error al resetear contraseña:', error.message);
+        res.status(500).json({ error: 'Error al actualizar la contraseña.' });
+    }
+});
+
+// 🔥 NUEVO: Activar o desactivar un chofer
+app.patch('/api/admin/choferes/:id/estado', verificarToken, async (req, res) => {
+    const { id } = req.params;
+    const { estado_activo } = req.body;
+
+    try {
+        const resultado = await pool.query(
+            'UPDATE choferes SET estado_activo = $1 WHERE id = $2 RETURNING id, nombre_completo, estado_activo',
+            [estado_activo, id]
+        );
+        if (resultado.rows.length === 0) return res.status(404).json({ error: 'Chofer no encontrado.' });
+        const estado = estado_activo ? 'activado' : 'desactivado';
+        console.log(`👤 Chofer ${resultado.rows[0].nombre_completo} ${estado}`);
+        res.json({ mensaje: `✅ Chofer ${estado} exitosamente.`, chofer: resultado.rows[0] });
+    } catch (error) {
+        console.error('Error al cambiar estado:', error.message);
+        res.status(500).json({ error: 'Error al actualizar el estado del chofer.' });
+    }
+});
+
 // ==========================================
-// MÓDULO DE AUTENTICACIÓN
+// MÓDULO DE AUTENTICACIÓN (APP MÓVIL)
 // ==========================================
 
 app.post('/api/choferes/registro', async (req, res) => {
     const { nombre_completo, placa_vehiculo, password } = req.body;
-
     try {
         const salt = await bcrypt.genSalt(10);
         const password_hash = await bcrypt.hash(password, salt);
-
         const query = `
             INSERT INTO choferes (nombre_completo, placa_vehiculo, password_hash)
             VALUES ($1, $2, $3) RETURNING id, nombre_completo, placa_vehiculo;
         `;
-        const valores = [nombre_completo, placa_vehiculo, password_hash];
-        const resultado = await pool.query(query, valores);
-
-        res.status(201).json({ 
-            mensaje: '✅ Chofer registrado con éxito', 
-            chofer: resultado.rows[0] 
-        });
+        const resultado = await pool.query(query, [nombre_completo, placa_vehiculo, password_hash]);
+        res.status(201).json({ mensaje: '✅ Chofer registrado con éxito', chofer: resultado.rows[0] });
     } catch (error) {
         console.error('Error al registrar:', error);
         res.status(500).json({ error: 'Error al registrar chofer en la base de datos' });
@@ -218,36 +219,25 @@ app.post('/api/choferes/registro', async (req, res) => {
 
 app.post('/api/login', async (req, res) => {
     const { placa_vehiculo, password } = req.body;
-
     try {
-        const query = 'SELECT * FROM choferes WHERE placa_vehiculo = $1';
-        const resultado = await pool.query(query, [placa_vehiculo]);
-
-        if (resultado.rows.length === 0) {
+        const resultado = await pool.query('SELECT * FROM choferes WHERE placa_vehiculo = $1', [placa_vehiculo]);
+        if (resultado.rows.length === 0)
             return res.status(401).json({ error: '❌ Placa o contraseña incorrecta' });
-        }
 
         const chofer = resultado.rows[0];
         const passwordValida = await bcrypt.compare(password, chofer.password_hash);
-        
-        if (!passwordValida) {
+        if (!passwordValida)
             return res.status(401).json({ error: '❌ Placa o contraseña incorrecta' });
-        }
 
         const token = jwt.sign(
             { id: chofer.id, placa: chofer.placa_vehiculo },
             process.env.JWT_SECRET,
             { expiresIn: '30d' }
         );
-
         res.json({
             mensaje: '🔓 Login exitoso',
-            token: token,
-            chofer: {
-                id: chofer.id,
-                nombre_completo: chofer.nombre_completo,
-                placa_vehiculo: chofer.placa_vehiculo
-            }
+            token,
+            chofer: { id: chofer.id, nombre_completo: chofer.nombre_completo, placa_vehiculo: chofer.placa_vehiculo }
         });
     } catch (error) {
         console.error('Error en Login:', error);
